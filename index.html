@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Danh bạ & Vị trí</title>
+<!--
+  FILE: index.html
+  Ý NGHĨA: Sổ lưu người quen kèm vị trí trên bản đồ.
+  MỤC ĐÍCH: Nhập nhanh, tra cứu theo tên, xem vị trí và chỉ đường qua Google Maps.
+  VAI TRÒ: Toàn bộ ứng dụng (HTML + CSS + JS), không backend. Theo SPEC_DanhBa_ViTri.md.
+  CÁC PHẦN QUAN TRỌNG:
+    - Dữ liệu: localStorage, khóa "contacts_v1" (mảng liên hệ).
+    - 3 tab: Nhập (thêm/sửa), Tra cứu (tìm/sửa/xóa/điều hướng), Bản đồ (marker).
+    - Cần Google Maps JavaScript API + Maps Static API.
+  LƯU Ý / BẢO MẬT:
+    - API_KEY lộ trong file: BẮT BUỘC giới hạn theo HTTP referrer và chỉ bật 2 API trên.
+    - Dữ liệu localStorage không mã hóa, mất khi xóa dữ liệu trình duyệt. Không dùng máy chung.
+    - Không đưa dữ liệu liên hệ lên repo. Cần mạng để tải bản đồ.
+-->
+<style>
+  body{font-family:sans-serif;margin:0;padding:12px;max-width:720px;margin:auto}
+  nav button{padding:10px 14px;margin-right:4px}
+  input,button{font-size:16px;padding:8px;margin:3px 0;box-sizing:border-box}
+  input{width:100%}
+  .the{border:1px solid #ccc;border-radius:6px;padding:8px;margin:10px 0;overflow-x:auto}
+  .the table{border-collapse:collapse;width:100%}
+  .the td{border-bottom:1px solid #eee;padding:4px;vertical-align:top}
+  .the td:first-child{font-weight:bold;width:90px}
+  .nutdh{display:inline-block;padding:8px;background:#1a73e8;color:#fff;border-radius:4px;text-decoration:none}
+  #map{width:100%;height:65vh}
+  #tb.loi{color:#c00}#tb.ok{color:#080}
+</style>
+</head>
+<body>
+<nav>
+  <button onclick="chuyenTab('nhap')">Nhập</button>
+  <button onclick="chuyenTab('tracuu')">Tra cứu</button>
+  <button onclick="chuyenTab('bando')">Bản đồ</button>
+</nav>
+
+<!-- Tab Nhập (dùng chung cho thêm mới và sửa) -->
+<section id="nhap">
+  <input id="ten" placeholder="Tên">
+  <input id="sdt" placeholder="Sđt">
+  <div>
+    <button onclick="chonDM('Gia đình')">Gia đình</button>
+    <button onclick="chonDM('Bạn bè')">Bạn bè</button>
+    <input id="dm" placeholder="Danh mục (chọn nhanh hoặc tự nhập)">
+  </div>
+  <input id="vitri" placeholder="Vị trí: vĩ độ,kinh độ (vd 10.955374,106.871206)">
+  <input id="gc" placeholder="Ghi chú">
+  <button id="btnLuu" onclick="luu()">Lưu</button>
+  <button id="btnHuy" onclick="thoatSua()" hidden>Hủy</button>
+  <p id="tb"></p>
+</section>
+
+<!-- Tab Tra cứu -->
+<section id="tracuu" hidden>
+  <input id="q" placeholder="Tìm theo tên" oninput="tim()">
+  <div id="kq"></div>
+</section>
+
+<!-- Tab Bản đồ -->
+<section id="bando" hidden>
+  <p id="bdLoi"></p>
+  <div id="map"></div>
+</section>
+
+<script>
+const KHOA = 'contacts_v1';
+const API_KEY = 'DAN_API_KEY_VAO_DAY'; // Thay bằng key đã giới hạn referrer
+const $ = id => document.getElementById(id);
+let suaId = null, bd, iw, mk = [], mapsSan = false;
+
+// --- Tiện ích ---
+const doc = () => { try { return JSON.parse(localStorage.getItem(KHOA)) || []; } catch (e) { return []; } };
+const ghi = d => localStorage.setItem(KHOA, JSON.stringify(d));
+const esc = s => String(s).replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';'); // chống chèn HTML
+const boDau = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+function docViTri(s) { // trả {lat,lng} hoặc null nếu sai định dạng/phạm vi
+  const m = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = +m[1], lng = +m[2];
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+function thongBao(t, loi) { $('tb').textContent = t; $('tb').className = loi ? 'loi' : 'ok'; }
+
+// --- Điều hướng tab ---
+function chuyenTab(t) {
+  ['nhap', 'tracuu', 'bando'].forEach(x => $(x).hidden = x !== t);
+  if (t === 'tracuu') tim();
+  if (t === 'bando') veBanDo();
+}
+
+// --- Tab Nhập ---
+function chonDM(v) { $('dm').value = v; } // nút chọn nhanh chỉ điền vào ô, không lưu danh sách
+function luu() {
+  const ten = $('ten').value.trim(), vt = docViTri($('vitri').value);
+  if (!ten) return thongBao('Vui lòng nhập Tên', 1);
+  if (!vt) return thongBao('Vị trí không hợp lệ (vd 10.955374,106.871206)', 1);
+  const d = doc(), i = d.findIndex(x => x.id === suaId); // suaId = null → i = -1 → thêm mới
+  const lh = { id: suaId || String(Date.now()), ten, sdt: $('sdt').value.trim(), danhMuc: $('dm').value.trim(), lat: vt.lat, lng: vt.lng, ghiChu: $('gc').value.trim() };
+  if (i < 0) d.push(lh); else d[i] = lh;
+  ghi(d);
+  const daSua = suaId !== null;
+  thoatSua();
+  thongBao(daSua ? 'Đã cập nhật' : 'Đã lưu');
+}
+function thoatSua() { // xóa trắng form, về chế độ nhập mới
+  suaId = null;
+  ['ten', 'sdt', 'dm', 'vitri', 'gc'].forEach(x => $(x).value = '');
+  $('btnHuy').hidden = true; $('btnLuu').textContent = 'Lưu'; thongBao('');
+}
+
+// --- Tab Tra cứu ---
+function the(c) {
+  const anh = `https://maps.googleapis.com/maps/api/staticmap?center=${c.lat},${c.lng}&zoom=15&size=300x200&markers=${c.lat},${c.lng}&key=${API_KEY}`;
+  return `<div class="the"><table>
+    <tr><td>Tên</td><td>${esc(c.ten)}</td></tr>
+    <tr><td>Sđt</td><td>${esc(c.sdt)}</td></tr>
+    <tr><td>Danh mục</td><td>${esc(c.danhMuc)}</td></tr>
+    <tr><td>Ghi chú</td><td>${esc(c.ghiChu)}</td></tr>
+    <tr><td>Vị trí</td><td><img src="${anh}" width="300" height="200" style="max-width:100%" onerror="this.replaceWith('Không tải được ảnh bản đồ')"><br>
+      <a class="nutdh" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}">Điều hướng</a></td></tr>
+  </table>
+  <button onclick="sua('${esc(c.id)}')">Sửa</button> <button onclick="xoa('${esc(c.id)}')">Xóa</button></div>`;
+}
+function tim() {
+  const k = boDau($('q').value.trim()), kq = doc().filter(c => boDau(c.ten).includes(k));
+  $('kq').innerHTML = kq.length ? kq.map(the).join('') : '<p>Không tìm thấy</p>';
+}
+function sua(id) {
+  const c = doc().find(x => x.id === id);
+  if (!c) return;
+  $('ten').value = c.ten; $('sdt').value = c.sdt; $('dm').value = c.danhMuc; $('vitri').value = c.lat + ',' + c.lng; $('gc').value = c.ghiChu;
+  suaId = id; $('btnHuy').hidden = false; $('btnLuu').textContent = 'Cập nhật';
+  chuyenTab('nhap'); thongBao('');
+}
+function xoa(id) {
+  if (!confirm('Xóa liên hệ này?')) return;
+  ghi(doc().filter(x => x.id !== id));
+  if (suaId === id) thoatSua(); // đang sửa đúng bản ghi bị xóa → thoát chế độ sửa
+  tim();
+}
+
+// --- Tab Bản đồ ---
+window.khoiTaoMaps = () => { mapsSan = true; if (!$('bando').hidden) veBanDo(); };
+window.gm_authFailure = () => { $('bdLoi').textContent = 'Key Google Maps không hợp lệ hoặc bị giới hạn'; };
+function veBanDo() {
+  if (!mapsSan) { $('bdLoi').textContent = 'Chưa tải được Google Maps (kiểm tra mạng)'; return; }
+  $('bdLoi').textContent = '';
+  if (!bd) { bd = new google.maps.Map($('map'), { center: { lat: 10.8, lng: 106.7 }, zoom: 10 }); iw = new google.maps.InfoWindow(); }
+  mk.forEach(m => m.setMap(null)); mk = [];
+  const d = doc(), kh = new google.maps.LatLngBounds();
+  d.forEach(c => {
+    const p = { lat: c.lat, lng: c.lng }, m = new google.maps.Marker({ map: bd, position: p });
+    m.addListener('click', () => { iw.setContent(`<b>${esc(c.ten)}</b><br>${esc(c.sdt)}`); iw.open(bd, m); });
+    mk.push(m); kh.extend(p);
+  });
+  if (d.length === 1) { bd.setCenter(mk[0].getPosition()); bd.setZoom(15); }
+  else if (d.length) bd.fitBounds(kh);
+}
+
+// --- Khởi động: nạp Google Maps JS ---
+const s = document.createElement('script');
+s.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&callback=khoiTaoMaps`;
+document.head.appendChild(s);
+</script>
+</body>
+</html>
