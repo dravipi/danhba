@@ -8,16 +8,18 @@
   FILE: index.html
   Ý NGHĨA: Sổ lưu người quen kèm vị trí trên bản đồ.
   MỤC ĐÍCH: Nhập nhanh, tra cứu theo tên, xem vị trí và chỉ đường qua Google Maps.
-  VAI TRÒ: Toàn bộ ứng dụng (HTML + CSS + JS), không backend. Theo SPEC_DanhBa_ViTri.md.
+  VAI TRÒ: Toàn bộ ứng dụng (HTML + CSS + JS), không backend. Theo SPEC_DanhBa_ViTri.md (bản 2026-09-28).
   CÁC PHẦN QUAN TRỌNG:
     - Dữ liệu: localStorage, khóa "contacts_v1" (mảng liên hệ).
     - 3 tab: Nhập (thêm/sửa), Tra cứu (tìm/sửa/xóa/điều hướng), Bản đồ (marker).
-    - Cần Google Maps JavaScript API + Maps Static API.
+    - Hiển thị bản đồ: Leaflet + OpenStreetMap (CDN, miễn phí, không cần API key/Billing).
+    - Nút Điều hướng: vẫn dùng link Google Maps (không cần API key).
   LƯU Ý / BẢO MẬT:
-    - API_KEY lộ trong file: BẮT BUỘC giới hạn theo HTTP referrer và chỉ bật 2 API trên.
     - Dữ liệu localStorage không mã hóa, mất khi xóa dữ liệu trình duyệt. Không dùng máy chung.
-    - Không đưa dữ liệu liên hệ lên repo. Cần mạng để tải bản đồ.
+    - Không đưa dữ liệu liên hệ lên repo. Cần mạng để tải tile bản đồ và mở Google Maps.
 -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   body{font-family:sans-serif;margin:0;padding:12px;max-width:720px;margin:auto}
   nav button{padding:10px 14px;margin-right:4px}
@@ -27,6 +29,7 @@
   .the table{border-collapse:collapse;width:100%}
   .the td{border-bottom:1px solid #eee;padding:4px;vertical-align:top}
   .the td:first-child{font-weight:bold;width:90px}
+  .minimap{width:100%;max-width:300px;height:200px}
   .nutdh{display:inline-block;padding:8px;background:#1a73e8;color:#fff;border-radius:4px;text-decoration:none}
   #map{width:100%;height:65vh}
   #tb.loi{color:#c00}#tb.ok{color:#080}
@@ -69,9 +72,15 @@
 
 <script>
 const KHOA = 'contacts_v1';
-const API_KEY = 'AIzaSyDEsnYyA40Dg3aVQPSfSMei_RjT6Bt0SdY'; // Thay bằng key đã giới hạn referrer
 const $ = id => document.getElementById(id);
-let suaId = null, bd, iw, mk = [], mapsSan = false;
+let suaId = null, bd, mkBando = [];
+
+// Icon mặc định của Leaflet lấy ảnh từ CDN (không dùng đường dẫn tương đối)
+L.Icon.Default.mergeOptions({
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png'
+});
 
 // --- Tiện ích ---
 const doc = () => { try { return JSON.parse(localStorage.getItem(KHOA)) || []; } catch (e) { return []; } };
@@ -115,13 +124,12 @@ function thoatSua() { // xóa trắng form, về chế độ nhập mới
 
 // --- Tab Tra cứu ---
 function the(c) {
-  const anh = `https://maps.googleapis.com/maps/api/staticmap?center=${c.lat},${c.lng}&zoom=15&size=300x200&markers=${c.lat},${c.lng}&key=${API_KEY}`;
   return `<div class="the"><table>
     <tr><td>Tên</td><td>${esc(c.ten)}</td></tr>
     <tr><td>Sđt</td><td>${esc(c.sdt)}</td></tr>
     <tr><td>Danh mục</td><td>${esc(c.danhMuc)}</td></tr>
     <tr><td>Ghi chú</td><td>${esc(c.ghiChu)}</td></tr>
-    <tr><td>Vị trí</td><td><img src="${anh}" width="300" height="200" style="max-width:100%" onerror="this.replaceWith('Không tải được ảnh bản đồ')"><br>
+    <tr><td>Vị trí</td><td><div class="minimap" id="mm-${esc(c.id)}"></div><br>
       <a class="nutdh" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}">Điều hướng</a></td></tr>
   </table>
   <button onclick="sua('${esc(c.id)}')">Sửa</button> <button onclick="xoa('${esc(c.id)}')">Xóa</button></div>`;
@@ -129,6 +137,14 @@ function the(c) {
 function tim() {
   const k = boDau($('q').value.trim()), kq = doc().filter(c => boDau(c.ten).includes(k));
   $('kq').innerHTML = kq.length ? kq.map(the).join('') : '<p>Không tìm thấy</p>';
+  // Khởi tạo bản đồ nhỏ cho từng kết quả (không tương tác, chỉ xem vị trí)
+  kq.forEach(c => {
+    const el = $('mm-' + c.id);
+    if (!el) return;
+    const m = L.map(el, { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false }).setView([c.lat, c.lng], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(m);
+    L.marker([c.lat, c.lng]).addTo(m);
+  });
 }
 function sua(id) {
   const c = doc().find(x => x.id === id);
@@ -145,27 +161,24 @@ function xoa(id) {
 }
 
 // --- Tab Bản đồ ---
-window.khoiTaoMaps = () => { mapsSan = true; if (!$('bando').hidden) veBanDo(); };
-window.gm_authFailure = () => { $('bdLoi').textContent = 'Key Google Maps không hợp lệ hoặc bị giới hạn'; };
 function veBanDo() {
-  if (!mapsSan) { $('bdLoi').textContent = 'Chưa tải được Google Maps (kiểm tra mạng)'; return; }
+  if (!window.L) { $('bdLoi').textContent = 'Chưa tải được bản đồ (kiểm tra mạng)'; return; }
   $('bdLoi').textContent = '';
-  if (!bd) { bd = new google.maps.Map($('map'), { center: { lat: 10.8, lng: 106.7 }, zoom: 10 }); iw = new google.maps.InfoWindow(); }
-  mk.forEach(m => m.setMap(null)); mk = [];
-  const d = doc(), kh = new google.maps.LatLngBounds();
+  if (!bd) bd = L.map('map').setView([10.8, 106.7], 10);
+  if (!bd._coLopNen) { // chỉ thêm 1 lần lớp nền OpenStreetMap
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(bd);
+    bd._coLopNen = true;
+  }
+  mkBando.forEach(m => bd.removeLayer(m)); mkBando = [];
+  const d = doc();
   d.forEach(c => {
-    const p = { lat: c.lat, lng: c.lng }, m = new google.maps.Marker({ map: bd, position: p });
-    m.addListener('click', () => { iw.setContent(`<b>${esc(c.ten)}</b><br>${esc(c.sdt)}`); iw.open(bd, m); });
-    mk.push(m); kh.extend(p);
+    const m = L.marker([c.lat, c.lng]).addTo(bd).bindPopup(`<b>${esc(c.ten)}</b><br>${esc(c.sdt)}`);
+    mkBando.push(m);
   });
-  if (d.length === 1) { bd.setCenter(mk[0].getPosition()); bd.setZoom(15); }
-  else if (d.length) bd.fitBounds(kh);
+  if (d.length === 1) bd.setView([d[0].lat, d[0].lng], 15);
+  else if (d.length) bd.fitBounds(L.latLngBounds(d.map(c => [c.lat, c.lng])), { padding: [20, 20] });
+  setTimeout(() => bd.invalidateSize(), 0); // sửa lỗi bản đồ vẽ sai kích thước khi tab vừa hiện
 }
-
-// --- Khởi động: nạp Google Maps JS ---
-const s = document.createElement('script');
-s.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&callback=khoiTaoMaps`;
-document.head.appendChild(s);
 </script>
 </body>
 </html>
