@@ -73,20 +73,23 @@
 <script>
 const KHOA = 'contacts_v1';
 const $ = id => document.getElementById(id);
-let suaId = null, bd, mkBando = [];
+let suaId = null, bd, mkBando = [], mmTraCuu = [];
 
 // Icon mặc định của Leaflet lấy ảnh từ CDN (không dùng đường dẫn tương đối)
-L.Icon.Default.mergeOptions({
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png'
-});
+// Sửa BUG-1: nếu CDN Leaflet chưa tải được thì bỏ qua, không làm chết toàn bộ script
+if (window.L) {
+  L.Icon.Default.mergeOptions({
+    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png'
+  });
+}
 
 // --- Tiện ích ---
 const doc = () => { try { return JSON.parse(localStorage.getItem(KHOA)) || []; } catch (e) { return []; } };
 const ghi = d => localStorage.setItem(KHOA, JSON.stringify(d));
 const esc = s => String(s).replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';'); // chống chèn HTML
-const boDau = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+const boDau = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
 function docViTri(s) { // trả {lat,lng} hoặc null nếu sai định dạng/phạm vi
   const m = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
   if (!m) return null;
@@ -136,14 +139,16 @@ function the(c) {
 }
 function tim() {
   const k = boDau($('q').value.trim()), kq = doc().filter(c => boDau(c.ten).includes(k));
+  mmTraCuu.forEach(m => m.remove()); mmTraCuu = []; // Sửa mục 3.1: gỡ minimap cũ trước khi vẽ lại, tránh rò rỉ + tăng request tile mỗi lần gõ
   $('kq').innerHTML = kq.length ? kq.map(the).join('') : '<p>Không tìm thấy</p>';
-  // Khởi tạo bản đồ nhỏ cho từng kết quả (không tương tác, chỉ xem vị trí)
+  if (!window.L) return; // CDN lỗi: không vẽ minimap, bảng + nút Điều hướng vẫn dùng được (BUG-1, tiêu chí #2)
   kq.forEach(c => {
     const el = $('mm-' + c.id);
     if (!el) return;
     const m = L.map(el, { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false }).setView([c.lat, c.lng], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(m);
     L.marker([c.lat, c.lng]).addTo(m);
+    mmTraCuu.push(m);
   });
 }
 function sua(id) {
