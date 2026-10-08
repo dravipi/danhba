@@ -78,6 +78,7 @@ let suaId = null, bd, mkBando = [], mmTraCuu = [];
 // Icon mặc định của Leaflet lấy ảnh từ CDN (không dùng đường dẫn tương đối)
 // Sửa BUG-1: nếu CDN Leaflet chưa tải được thì bỏ qua, không làm chết toàn bộ script
 if (window.L) {
+  delete L.Icon.Default.prototype._getIconUrl; // Sửa BUG-3: tránh _getIconUrl nối thêm imagePath trước URL tuyệt đối
   L.Icon.Default.mergeOptions({
     iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
@@ -142,6 +143,7 @@ function tim() {
   mmTraCuu.forEach(m => m.remove()); mmTraCuu = []; // Sửa mục 3.1: gỡ minimap cũ trước khi vẽ lại, tránh rò rỉ + tăng request tile mỗi lần gõ
   $('kq').innerHTML = kq.length ? kq.map(the).join('') : '<p>Không tìm thấy</p>';
   if (!window.L) return; // CDN lỗi: không vẽ minimap, bảng + nút Điều hướng vẫn dùng được (BUG-1, tiêu chí #2)
+  // Khởi tạo bản đồ nhỏ cho từng kết quả (không tương tác, chỉ xem vị trí)
   kq.forEach(c => {
     const el = $('mm-' + c.id);
     if (!el) return;
@@ -171,7 +173,9 @@ function veBanDo() {
   $('bdLoi').textContent = '';
   if (!bd) bd = L.map('map').setView([10.8, 106.7], 10);
   if (!bd._coLopNen) { // chỉ thêm 1 lần lớp nền OpenStreetMap
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(bd);
+    const lop = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(bd);
+    lop.on('tileerror', () => { $('bdLoi').textContent = 'Chưa tải được nền bản đồ (kiểm tra mạng)'; }); // Sửa BUG-2
+    lop.on('tileload', () => { $('bdLoi').textContent = ''; }); // Sửa BUG-2: hết lỗi khi tải lại được tile
     bd._coLopNen = true;
   }
   mkBando.forEach(m => bd.removeLayer(m)); mkBando = [];
