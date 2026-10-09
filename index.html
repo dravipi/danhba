@@ -90,7 +90,7 @@ if (window.L) {
 const doc = () => { try { return JSON.parse(localStorage.getItem(KHOA)) || []; } catch (e) { return []; } };
 const ghi = d => localStorage.setItem(KHOA, JSON.stringify(d));
 const esc = s => String(s).replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';'); // chống chèn HTML
-const boDau = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
+const boDau = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
 function docViTri(s) { // trả {lat,lng} hoặc null nếu sai định dạng/phạm vi
   const m = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
   if (!m) return null;
