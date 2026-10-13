@@ -18,8 +18,22 @@
     - Dữ liệu localStorage không mã hóa, mất khi xóa dữ liệu trình duyệt. Không dùng máy chung.
     - Không đưa dữ liệu liên hệ lên repo. Cần mạng để tải tile bản đồ và mở Google Maps.
 -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// Sửa BUG-4: CDN chính (cdnjs) đôi khi không tải được trên một số máy/mạng dù trang khác vẫn tải CDN đó bình thường.
+// Tự chuyển sang CDN dự phòng (jsDelivr) khi lỗi onerror, và kiểm tra lại sau vài giây phòng trường hợp lỗi "âm thầm" không báo onerror.
+function taiLeafletDuPhong() {
+  if (window.L || window._daThuDuPhong) return;
+  window._daThuDuPhong = true;
+  document.getElementById('leafletCss').href = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
+  s.onload = () => { if (typeof capNhatSauKhiCoLeaflet === 'function') capNhatSauKhiCoLeaflet(); };
+  document.head.appendChild(s);
+}
+setTimeout(taiLeafletDuPhong, 3000);
+</script>
+<link id="leafletCss" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" onerror="taiLeafletDuPhong()">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" onerror="taiLeafletDuPhong()"></script>
 <style>
   body{font-family:sans-serif;margin:0;padding:12px;max-width:720px;margin:auto}
   nav button{padding:10px 14px;margin-right:4px}
@@ -77,13 +91,20 @@ let suaId = null, bd, mkBando = [], mmTraCuu = [];
 
 // Icon mặc định của Leaflet lấy ảnh từ CDN (không dùng đường dẫn tương đối)
 // Sửa BUG-1: nếu CDN Leaflet chưa tải được thì bỏ qua, không làm chết toàn bộ script
-if (window.L) {
+function suaIconLeaflet() { // tách hàm để gọi lại được khi CDN dự phòng tải xong (BUG-4)
   delete L.Icon.Default.prototype._getIconUrl; // Sửa BUG-3: tránh _getIconUrl nối thêm imagePath trước URL tuyệt đối
   L.Icon.Default.mergeOptions({
     iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png'
   });
+}
+if (window.L) suaIconLeaflet();
+// Sửa BUG-4: CDN dự phòng tải xong sau khi tab đã lỡ hiện lỗi → vẽ lại đúng tab đang mở
+function capNhatSauKhiCoLeaflet() {
+  suaIconLeaflet();
+  if (!$('bando').hidden) veBanDo();
+  if (!$('tracuu').hidden) tim();
 }
 
 // --- Tiện ích ---
