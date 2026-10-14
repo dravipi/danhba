@@ -93,10 +93,12 @@ let suaId = null, bd, mkBando = [], mmTraCuu = [];
 // Sửa BUG-1: nếu CDN Leaflet chưa tải được thì bỏ qua, không làm chết toàn bộ script
 function suaIconLeaflet() { // tách hàm để gọi lại được khi CDN dự phòng tải xong (BUG-4)
   delete L.Icon.Default.prototype._getIconUrl; // Sửa BUG-3: tránh _getIconUrl nối thêm imagePath trước URL tuyệt đối
+  // Sửa BUG-4 (vòng 2): ảnh marker lấy theo đúng CDN đang dùng, tránh vỡ ảnh khi cdnjs bị chặn
+  const goc = window._daThuDuPhong ? 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/' : 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/';
   L.Icon.Default.mergeOptions({
-    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png'
+    iconUrl: goc + 'marker-icon.png',
+    iconRetinaUrl: goc + 'marker-icon-2x.png',
+    shadowUrl: goc + 'marker-shadow.png'
   });
 }
 if (window.L) suaIconLeaflet();
